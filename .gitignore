@@ -1,3 +1,10 @@
 
 # env
 .env
+
+# raw data
+data/raw/
+
+
+# macOS
+.DS_Store
