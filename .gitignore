@@ -1,14 +1,22 @@
-
 # env
 .env
 
 # raw data
 data/raw/
 
-
 # macOS
 .DS_Store
 
+# Jupyter / Anaconda
 .ipynb_checkpoints/
 .virtual_documents/
 anaconda_projects/
+notebooks/*.ipynb
+
+# Python
+__pycache__/
+*.pyc
+
+# Artifacts (keep only final model)
+artifacts/*
+!artifacts/rf_tuned.joblib
