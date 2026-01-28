@@ -34,9 +34,9 @@ def get_conn():
     load_dotenv(PROJECT_ROOT / ".env")  # local only, not committed
     host = os.getenv("DB_HOST", "localhost")
     port = int(os.getenv("DB_PORT", "5432"))
-    dbname = os.getenv("DB_NAME", "superstore")
-    user = os.getenv("DB_USER", "superstore_user")
-    password = os.getenv("DB_PASSWORD", "REDACTED")
+    dbname = os.getenv("DB_NAME")
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
 
     return psycopg2.connect(
         host=host, port=port, dbname=dbname, user=user, password=password
