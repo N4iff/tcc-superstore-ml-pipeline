@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-
 app = FastAPI(title="Superstore Profit Predictor (RF tuned)", version="1.0.0")
 
 MODEL_PATH = "artifacts/rf_tuned.joblib"
@@ -24,8 +23,11 @@ MODEL_VERSION = "1.0.0"
 TARGET_NAME = "profit_margin"
 
 
+# --------------------
+# Request Schemas
+# --------------------
 class PredictRequest(BaseModel):
-    # Optional: if you already have the row id in raw_superstore, pass it to log predictions
+    # Optional: if you already have the row id in raw_superstore
     raw_id: Optional[int] = None
 
     sales: float
@@ -38,7 +40,13 @@ class PredictRequest(BaseModel):
     ship_mode: str
 
 
-# --- DB helpers ---
+class PredictByRawIdRequest(BaseModel):
+    raw_id: int
+
+
+# --------------------
+# DB helpers
+# --------------------
 def get_db_conn():
     """
     Creates a new DB connection per request.
@@ -58,7 +66,6 @@ def get_db_conn():
         password=password,
         cursor_factory=RealDictCursor,
     )
-
 
 
 def db_ping() -> bool:
@@ -82,7 +89,6 @@ def insert_prediction(
 ) -> None:
     """
     Inserts one prediction into the predictions table.
-    raw_id can be None if we don't have an ID from raw_superstore.
     """
     sql = """
         INSERT INTO predictions (raw_id, model_name, model_version, target, prediction)
@@ -94,6 +100,34 @@ def insert_prediction(
         conn.commit()
 
 
+def fetch_raw_features(raw_id: int) -> Optional[dict]:
+    """
+    Fetches model features from raw_superstore by raw_id.
+    """
+    sql = """
+        SELECT
+            sales,
+            quantity,
+            discount,
+            segment,
+            region,
+            category,
+            sub_category,
+            ship_mode
+        FROM raw_superstore
+        WHERE id = %s
+        LIMIT 1;
+    """
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (raw_id,))
+            row = cur.fetchone()
+    return row
+
+
+# --------------------
+# API Endpoints
+# --------------------
 @app.get("/health")
 def health():
     return {
@@ -115,7 +149,6 @@ def predict(req: PredictRequest):
     x = pd.DataFrame([payload])
     y_pred = float(model.predict(x)[0])
 
-    # Log prediction to DB (best-effort)
     insert_prediction(
         raw_id=raw_id,
         model_name=MODEL_NAME,
@@ -129,5 +162,31 @@ def predict(req: PredictRequest):
         "profit_margin_percent": round(y_pred * 100, 2),
         "logged_to_db": True,
         "raw_id": raw_id,
+        "model_version": MODEL_VERSION,
+    }
+
+
+@app.post("/predict/by-raw-id")
+def predict_by_raw_id(req: PredictByRawIdRequest):
+    row = fetch_raw_features(req.raw_id)
+    if row is None:
+        return {"error": f"raw_id={req.raw_id} not found in raw_superstore"}
+
+    x = pd.DataFrame([row])
+    y_pred = float(model.predict(x)[0])
+
+    insert_prediction(
+        raw_id=req.raw_id,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+        target=TARGET_NAME,
+        prediction=y_pred,
+    )
+
+    return {
+        "raw_id": req.raw_id,
+        "y_pred": y_pred,
+        "profit_margin_percent": round(y_pred * 100, 2),
+        "logged_to_db": True,
         "model_version": MODEL_VERSION,
     }
