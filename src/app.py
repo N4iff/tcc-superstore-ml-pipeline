@@ -57,7 +57,6 @@ load_model()
 # Request Schemas
 # --------------------
 class PredictRequest(BaseModel):
-    raw_id: Optional[int] = None
     sales: float
     quantity: int
     discount: float
@@ -183,7 +182,6 @@ def health():
 @app.post("/predict")
 def predict(req: PredictRequest):
     payload = req.model_dump()
-    raw_id = payload.pop("raw_id", None)
 
     x = pd.DataFrame([payload])
     try:
@@ -193,7 +191,7 @@ def predict(req: PredictRequest):
 
     try:
         prediction_id = insert_prediction(
-            raw_id=raw_id,
+            raw_id=None,  # manual/ad-hoc prediction has no raw_id
             model_name=MODEL_NAME,
             model_version=MODEL_VERSION,
             target=TARGET_NAME,
@@ -207,7 +205,6 @@ def predict(req: PredictRequest):
         "y_pred": y_pred,
         "profit_margin_percent": round(y_pred * 100, 2),
         "logged_to_db": True,
-        "raw_id": raw_id,
         "model_name": MODEL_NAME,
         "model_version": MODEL_VERSION,
         "target": TARGET_NAME,

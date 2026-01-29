@@ -1,22 +1,40 @@
-# env
+# --------------------
+# Environment
+# --------------------
 .env
 
-# raw data
+# --------------------
+# Raw data
+# --------------------
 data/raw/
 
+# --------------------
 # macOS
+# --------------------
 .DS_Store
 
+# --------------------
 # Jupyter / Anaconda
+# --------------------
 .ipynb_checkpoints/
 .virtual_documents/
 anaconda_projects/
 notebooks/*.ipynb
 
+# --------------------
 # Python
+# --------------------
 __pycache__/
 *.pyc
 
-# Artifacts (keep only final model)
-artifacts/*
-!artifacts/rf_tuned.joblib
+# --------------------
+# Artifacts (MLflow is source of truth)
+# --------------------
+artifacts/
+
+# --------------------
+# MLflow local state
+# --------------------
+mlartifacts/
+mlruns/
+mlflow.db
