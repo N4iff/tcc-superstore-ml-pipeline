@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS predictions (
 
   model_name TEXT NOT NULL,
   model_version TEXT NOT NULL,
-  target TEXT NOT NULL,          -- "sales" or "profit"
+  target TEXT NOT NULL,          -- "profit_margin" (final target)
   prediction NUMERIC NOT NULL,
 
   created_at TIMESTAMP DEFAULT NOW()
