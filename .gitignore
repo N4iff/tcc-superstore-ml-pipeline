@@ -1,0 +1,35 @@
+# =====================
+# Environment
+# =====================
+.env
+
+# =====================
+# OS / Editor
+# =====================
+.DS_Store
+.ipynb_checkpoints/
+.virtual_documents/
+__pycache__/
+
+# =====================
+# Anaconda / Jupyter
+# =====================
+anaconda_projects/
+notebooks/.ipynb_checkpoints/
+notebooks/*.ipynb
+
+# =====================
+# Raw / Local data
+# =====================
+data/raw/
+
+# =====================
+# MLflow (LOCAL ONLY)
+# =====================
+mlflow.db
+mlartifacts/
+
+# =====================
+# Python cache
+# =====================
+*.pyc
