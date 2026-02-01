@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:16
+    container_name: superstore-db
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - superstore_db_data:/var/lib/postgresql/data
+
+volumes:
+  superstore_db_data:
