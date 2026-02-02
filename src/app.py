@@ -30,36 +30,36 @@ model: Any = None
 
 
 def load_model():
-    """
-    Try MLflow if MODEL_URI is set; otherwise fallback to joblib.
-    If MLflow fails for any reason, we fallback to joblib to keep the API available.
-    """
     global model, MODEL_VERSION
 
-    # 1) Try MLflow
+    # 1) Try MLflow if MODEL_URI is set
     if MODEL_URI:
         try:
             import mlflow
             import mlflow.pyfunc
 
-            mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001"))
+            mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+            if not mlflow_tracking_uri:
+                raise RuntimeError("MLFLOW_TRACKING_URI environment variable is required when using MODEL_URI")
+
+            mlflow.set_tracking_uri(mlflow_tracking_uri)
             model = mlflow.pyfunc.load_model(MODEL_URI)
 
-            # best-effort parse version if URI is models:/name/version
             if MODEL_URI.startswith("models:/"):
-                parts = MODEL_URI.split("/")
-                if len(parts) >= 3:
-                    MODEL_VERSION = parts[-1]
+                MODEL_VERSION = MODEL_URI.split("/")[-1]
 
             print(f"[INFO] Loaded model from MLflow: {MODEL_URI}")
             return
         except Exception as e:
-            print(f"[WARN] Failed to load MLflow model from MODEL_URI={MODEL_URI}. "
-                  f"Falling back to joblib. Error: {e}")
+            print(f"[WARNING] Failed to load model from MLflow ({MODEL_URI}): {e}")
+            print(f"[INFO] Falling back to joblib: {MODEL_PATH}")
 
     # 2) Fallback to joblib
     if not os.path.exists(MODEL_PATH):
-        raise RuntimeError(f"MODEL_PATH not found: {MODEL_PATH}")
+        raise RuntimeError(
+            f"MODEL_PATH not found: {MODEL_PATH}. "
+            f"Either set MODEL_URI (for MLflow) or ensure MODEL_PATH exists (for joblib)."
+        )
 
     model = joblib.load(MODEL_PATH)
     # keep MODEL_VERSION from env if provided; otherwise "local-joblib"
