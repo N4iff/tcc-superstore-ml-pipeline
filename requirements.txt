@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+pandas
+joblib
+psycopg2-binary
+python-dotenv
+mlflow
+# Pin scikit-learn to the version used when training the model
+scikit-learn==1.5.1

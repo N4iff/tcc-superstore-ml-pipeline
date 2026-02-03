@@ -10,13 +10,13 @@
 .ipynb_checkpoints/
 .virtual_documents/
 __pycache__/
+*.pyc
 
 # =====================
-# Anaconda / Jupyter
+# Jupyter
 # =====================
-anaconda_projects/
 notebooks/.ipynb_checkpoints/
-notebooks/*.ipynb
+anaconda_projects/
 
 # =====================
 # Raw / Local data
@@ -28,8 +28,14 @@ data/raw/
 # =====================
 mlflow.db
 mlartifacts/
+mlruns/
 
 # =====================
-# Python cache
+# Artifacts (local only)
 # =====================
-*.pyc
+notebooks/artifacts/
+
+# =====================
+# Docker
+# =====================
+**/__pycache__/
