@@ -1,0 +1,17 @@
+.env
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+notebooks/
+data/
+mlruns/
+mlartifacts/
+*.joblib
+*.pkl
+.vscode/
+.idea/
+.DS_Store

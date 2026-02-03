@@ -1,3 +1,15 @@
+# Docker Compose configuration for Superstore ML Pipeline
+# 
+# Usage:
+#   cd docker
+#   docker compose --env-file ../.env up
+#
+# Or from project root:
+#   docker compose -f docker/docker-compose.yml --env-file .env up
+#
+# Note: --env-file is required for variable substitution in docker-compose.yml
+#       (e.g., ${POSTGRES_DB}, ${MODEL_URI})
+
 services:
   db:
     image: postgres:16
@@ -13,6 +25,50 @@ services:
       - "5432:5432"
     volumes:
       - superstore_db_data:/var/lib/postgresql/data
+      - ../sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+
+  mlflow:
+    # MLflow Tracking Server
+    # - Inside container: http://mlflow:5000 (for other containers)
+    # - On host: http://127.0.0.1:5001 (for notebooks/scripts)
+    image: ghcr.io/mlflow/mlflow:v2.14.2
+    container_name: superstore-mlflow
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    ports:
+      - "5001:5000"  # Host:Container port mapping
+    volumes:
+      - mlflow_data:/mlflow  # Persistent storage for DB and artifacts
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --serve-artifacts
+      --artifacts-destination /mlflow/artifacts
+
+  api:
+    # FastAPI application
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: superstore-api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      MLFLOW_TRACKING_URI: http://mlflow:5000  # Internal Docker network
+      MODEL_URI: ${MODEL_URI}  # e.g., models:/rf_profit_margin/1
+      MODEL_PATH: ${MODEL_PATH}  # Fallback path for joblib models
+    depends_on:
+      - db
+      - mlflow
+    ports:
+      - "8000:8000"
 
 volumes:
   superstore_db_data:
+  mlflow_data:
