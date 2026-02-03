@@ -5,6 +5,6 @@ pandas
 joblib
 psycopg2-binary
 python-dotenv
-mlflow
+mlflow==2.14.2
 # Pin scikit-learn to the version used when training the model
 scikit-learn==1.5.1
