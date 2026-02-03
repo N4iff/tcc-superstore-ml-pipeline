@@ -5,7 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY src/ ./src
+COPY sql/ ./sql
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
