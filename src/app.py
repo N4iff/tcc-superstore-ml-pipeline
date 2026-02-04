@@ -5,6 +5,7 @@ from typing import Optional, Any
 import os
 import joblib
 import pandas as pd
+import logging
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -56,10 +57,13 @@ def load_model():
 
     # 2) Fallback to joblib
     if not os.path.exists(MODEL_PATH):
-        raise RuntimeError(
-            f"MODEL_PATH not found: {MODEL_PATH}. "
-            f"Either set MODEL_URI (for MLflow) or ensure MODEL_PATH exists (for joblib)."
+        logging.warning(
+            f"Model not loaded (MLflow failed and joblib not found at {MODEL_PATH}). "
+            "API will start, but /predict endpoints will fail until a model is available."
         )
+        model = None
+        MODEL_VERSION = "not-loaded"
+        return
 
     model = joblib.load(MODEL_PATH)
     # keep MODEL_VERSION from env if provided; otherwise "local-joblib"
@@ -235,6 +239,9 @@ def predict_df(x: pd.DataFrame) -> list[float]:
     Works with both sklearn (joblib) and mlflow.pyfunc models.
     Returns list[float] predictions (supports batch).
     """
+    if model is None:
+        raise RuntimeError("Model is not loaded yet.")
+
     y = model.predict(x)
     # normalize to python floats
     try:
@@ -272,6 +279,7 @@ def health():
         "target": TARGET_NAME,
         "db_connected": db_ping(),
         "model_uri": MODEL_URI,
+        "model_loaded": model is not None,
     }
 
 
@@ -283,7 +291,7 @@ def predict(req: PredictRequest):
     try:
         y_pred = predict_df(x)[0]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Model prediction failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Model not available: {e}")
 
     try:
         prediction_id = insert_prediction(
@@ -321,7 +329,7 @@ def predict_by_raw_id(req: PredictByRawIdRequest):
     try:
         y_pred = predict_df(x)[0]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Model prediction failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Model not available: {e}")
 
     try:
         prediction_id = insert_prediction(
@@ -385,7 +393,7 @@ def predict_batch_by_raw_ids(req: PredictBatchByRawIdsRequest):
         try:
             preds = predict_df(x)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Model prediction failed: {e}")
+            raise HTTPException(status_code=503, detail=f"Model not available: {e}")
 
         try:
             total_logged += insert_predictions_bulk([
