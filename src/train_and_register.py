@@ -14,11 +14,35 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from mlflow.models import infer_signature
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# ============================================================
+# FEATURE CONTRACT (THIS MUST MATCH THE API)
+# ============================================================
 
+NUMERIC_FEATURES = [
+    "sales",
+    "quantity",
+    "discount",
+]
+
+CATEGORICAL_FEATURES = [
+    "segment",
+    "region",
+    "category",
+    "sub_category",
+    "ship_mode",
+]
+
+ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+
+
+# ============================================================
+# DB helpers
+# ============================================================
 
 def build_engine_from_env():
     db_host = os.getenv("POSTGRES_HOST", "127.0.0.1")
@@ -26,7 +50,6 @@ def build_engine_from_env():
     db_name = os.getenv("POSTGRES_DB", "superstore")
     db_user = os.getenv("POSTGRES_USER", "postgres")
     db_password = os.getenv("POSTGRES_PASSWORD", "postgres")
-
 
     url = f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     return create_engine(url, pool_pre_ping=True)
@@ -39,6 +62,10 @@ def load_processed_superstore(engine, table_name="processed_superstore"):
     return df
 
 
+# ============================================================
+# Metrics
+# ============================================================
+
 def evaluate(y_true, y_pred):
     mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
@@ -46,15 +73,11 @@ def evaluate(y_true, y_pred):
     return {"mae": float(mae), "rmse": float(rmse), "r2": float(r2)}
 
 
-def build_preprocess(df, target_col, explicit_num_cols=None, explicit_cat_cols=None):
-    if explicit_num_cols is None or explicit_cat_cols is None:
-        candidate_cols = [c for c in df.columns if c != target_col]
-        num_cols = [c for c in candidate_cols if pd.api.types.is_numeric_dtype(df[c])]
-        cat_cols = [c for c in candidate_cols if not pd.api.types.is_numeric_dtype(df[c])]
-    else:
-        num_cols = list(explicit_num_cols)
-        cat_cols = list(explicit_cat_cols)
+# ============================================================
+# Preprocessing
+# ============================================================
 
+def build_preprocess():
     numeric_pipeline = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
@@ -71,18 +94,22 @@ def build_preprocess(df, target_col, explicit_num_cols=None, explicit_cat_cols=N
 
     preprocess = ColumnTransformer(
         transformers=[
-            ("num", numeric_pipeline, num_cols),
-            ("cat", categorical_pipeline, cat_cols),
+            ("num", numeric_pipeline, NUMERIC_FEATURES),
+            ("cat", categorical_pipeline, CATEGORICAL_FEATURES),
         ],
         remainder="drop",
         sparse_threshold=0.3,
     )
 
-    return preprocess, num_cols, cat_cols
+    return preprocess
 
+
+# ============================================================
+# Training
+# ============================================================
 
 def main():
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://34.170.4.31:5000")
     experiment_name = os.getenv("EXPERIMENT_NAME", "superstore-profit-margin")
     registered_model_name = os.getenv("REGISTERED_MODEL_NAME", "rf_profit_margin")
     model_table = os.getenv("PROCESSED_TABLE", "processed_superstore")
@@ -96,19 +123,29 @@ def main():
     engine = build_engine_from_env()
     df = load_processed_superstore(engine, table_name=model_table)
 
+    # ------------------------------------------------------------
+    # Validate schema
+    # ------------------------------------------------------------
+    missing_features = [c for c in ALL_FEATURES if c not in df.columns]
+    if missing_features:
+        raise ValueError(f"Missing required feature columns: {missing_features}")
+
     if target_col not in df.columns:
-        raise ValueError(f"Target column '{target_col}' not found in table '{model_table}'")
+        raise ValueError(f"Target column '{target_col}' not found")
 
     df = df.dropna(subset=[target_col]).copy()
 
-    preprocess, num_cols, cat_cols = build_preprocess(df, target_col=target_col)
-
-    X = df[num_cols + cat_cols]
+    # ------------------------------------------------------------
+    # Build X / y (EXPLICIT)
+    # ------------------------------------------------------------
+    X = df[ALL_FEATURES].copy()
     y = df[target_col].astype(float)
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
+
+    preprocess = build_preprocess()
 
     rf_base = Pipeline(
         steps=[
@@ -159,19 +196,20 @@ def main():
 
         mlflow.log_params(best_params)
         mlflow.log_metric("cv_rmse", best_cv_rmse)
-        mlflow.log_metric("test_mae", float(test_metrics["mae"]))
-        mlflow.log_metric("test_rmse", float(test_metrics["rmse"]))
-        mlflow.log_metric("test_r2", float(test_metrics["r2"]))
+        mlflow.log_metric("test_mae", test_metrics["mae"])
+        mlflow.log_metric("test_rmse", test_metrics["rmse"])
+        mlflow.log_metric("test_r2", test_metrics["r2"])
+
+        signature = infer_signature(X_train, y_train)
 
         mlflow.sklearn.log_model(
             sk_model=best_rf,
             artifact_path="model",
             registered_model_name=registered_model_name,
+            signature=signature,
         )
 
-        print("Logged training run and registered model.")
-        print(f"Experiment: {experiment_name}")
-        print(f"Tracking URI: {tracking_uri}")
+        print("Model trained and registered successfully.")
         print(f"Registered model: {registered_model_name}")
         print(f"Best CV RMSE: {best_cv_rmse}")
         print(f"Test metrics: {test_metrics}")
