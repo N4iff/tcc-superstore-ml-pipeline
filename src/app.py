@@ -6,6 +6,9 @@ import os
 import joblib
 import pandas as pd
 import logging
+import pika
+import json
+
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -26,6 +29,9 @@ MODEL_PATH = os.getenv("MODEL_PATH", "artifacts/rf_tuned.joblib")
 # If you set MODEL_URI, we load from MLflow instead of joblib
 MODEL_URI = os.getenv("MODEL_URI")  # e.g. "models:/rf_profit_margin/1"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "local-joblib")  # will override if MLflow is used
+
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "predict_jobs")
 
 model: Any = None
 
@@ -427,3 +433,31 @@ def predict_batch_by_raw_ids(req: PredictBatchByRawIdsRequest):
         "target": TARGET_NAME,
         "results": all_results,
     }
+
+
+# --------------------
+# ASYNC QUEUE ENDPOINT (NEW)
+# --------------------
+@app.post("/predict_async")
+def predict_async(req: PredictRequest):
+    payload = req.model_dump()
+
+    try:
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=RABBITMQ_HOST)
+        )
+        channel = connection.channel()
+        channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
+
+        channel.basic_publish(
+            exchange="",
+            routing_key=RABBITMQ_QUEUE,
+            body=json.dumps(payload).encode("utf-8"),
+            properties=pika.BasicProperties(delivery_mode=2),
+        )
+
+        connection.close()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Queue publish failed: {e}")
+
+    return {"status": "queued"}
