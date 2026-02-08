@@ -60,6 +60,9 @@ The goal of the project is **not only model performance**, but also **reproducib
 │   └── app.py
 ├── requirements.txt
 └── README.md
+```
+
+---
 
 ## Data Pipeline
 
@@ -154,7 +157,9 @@ Swagger UI is available at:
 
 ```text
 /docs
+```
 
+---
 
 ## Deployment
 
@@ -179,6 +184,7 @@ To run the project locally:
 
 ```bash
 docker compose up --build
+```
 
 All dependencies, services, and configurations are fully containerized, ensuring consistent behavior across environments.
 
