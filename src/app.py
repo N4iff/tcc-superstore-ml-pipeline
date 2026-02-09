@@ -30,8 +30,14 @@ MODEL_PATH = os.getenv("MODEL_PATH", "artifacts/rf_tuned.joblib")
 MODEL_URI = os.getenv("MODEL_URI")  # e.g. "models:/rf_profit_margin/1"
 MODEL_VERSION = os.getenv("MODEL_VERSION", "local-joblib")  # will override if MLflow is used
 
+
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", "5672"))
+RABBITMQ_USER = os.getenv("RABBITMQ_USER", "superstore")
+RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "")
 RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "predict_jobs")
+RABBITMQ_VHOST = os.getenv("RABBITMQ_VHOST", "/")
+
 
 model: Any = None
 
@@ -443,11 +449,27 @@ def predict_async(req: PredictRequest):
     payload = req.model_dump()
 
     try:
-        connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host=RABBITMQ_HOST)
+        credentials = pika.PlainCredentials(
+            RABBITMQ_USER,
+            RABBITMQ_PASSWORD,
         )
+
+        params = pika.ConnectionParameters(
+            host=RABBITMQ_HOST,
+            port=RABBITMQ_PORT,
+            virtual_host=RABBITMQ_VHOST,
+            credentials=credentials,
+            heartbeat=30,
+            blocked_connection_timeout=30,
+        )
+
+        connection = pika.BlockingConnection(params)
         channel = connection.channel()
-        channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
+
+        channel.queue_declare(
+            queue=RABBITMQ_QUEUE,
+            durable=True,
+        )
 
         channel.basic_publish(
             exchange="",
@@ -457,7 +479,12 @@ def predict_async(req: PredictRequest):
         )
 
         connection.close()
+
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Queue publish failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Queue publish failed: {e}",
+        )
 
     return {"status": "queued"}
+
