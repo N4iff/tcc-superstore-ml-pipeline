@@ -54,6 +54,19 @@ def get_db_conn():
         cursor_factory=RealDictCursor,
     )
 
+def job_set_status(job_id: str, status: str, prediction_id: Optional[int] = None, error: Optional[str] = None) -> None:
+    sql = """
+        UPDATE async_jobs
+        SET status = %s,
+            prediction_id = COALESCE(%s, prediction_id),
+            error = %s
+        WHERE job_id = %s
+    """
+    with get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (status, prediction_id, error, job_id))
+        conn.commit()
+
 
 def insert_prediction(
     raw_id: Optional[int],
@@ -131,22 +144,54 @@ def predict_one(payload: dict) -> float:
 # RabbitMQ
 # --------------------
 def connect_with_retry():
-    credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
-    params = pika.ConnectionParameters(
-        host=RABBITMQ_HOST,
-        port=RABBITMQ_PORT,
-        virtual_host=RABBITMQ_VHOST,
-        credentials=credentials,
-        heartbeat=30,
-        blocked_connection_timeout=30,
-    )
-
     while True:
         try:
+            credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
+            params = pika.ConnectionParameters(
+                host=RABBITMQ_HOST,
+                port=RABBITMQ_PORT,
+                virtual_host=RABBITMQ_VHOST,
+                credentials=credentials,
+                heartbeat=30,
+                blocked_connection_timeout=30,
+            )
             return pika.BlockingConnection(params)
         except Exception as e:
-            logging.warning(f"RabbitMQ not ready / auth failed: {e}. Retrying in 2s...")
+            logging.warning(f"RabbitMQ not ready yet: {e}. Retrying...")
             time.sleep(2)
+
+def callback(ch, method, properties, body):
+    job_id = None
+    try:
+        msg = json.loads(body.decode("utf-8"))
+
+        # message is {"job_id": "...", "payload": {...}}
+        job_id = msg.get("job_id")
+        payload = msg.get("payload")
+
+        if not job_id or not isinstance(payload, dict):
+            raise ValueError("Invalid message: expected {'job_id', 'payload'}")
+
+        job_set_status(job_id, "processing")
+
+        y_pred = predict_one(payload)
+        prediction_id = insert_prediction(None,y_pred)
+
+        job_set_status(job_id, "done", prediction_id=prediction_id, error=None)
+        logging.info(f"Job done. job_id={job_id} prediction_id={prediction_id}, y_pred={y_pred}")
+
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+    except Exception as e:
+        logging.exception(f"Job failed: job_id={job_id} err={e}")
+        if job_id:
+            try:
+                job_set_status(job_id, "failed", prediction_id=None, error=str(e))
+            except Exception:
+                logging.exception("Failed to update async_jobs status to failed")
+
+        # Ack so it doesn’t loop forever
+        ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def main():
@@ -155,25 +200,15 @@ def main():
     connection = connect_with_retry()
     channel = connection.channel()
     channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
+    channel.basic_consume(
+        queue=RABBITMQ_QUEUE,
+        on_message_callback=callback,
+        auto_ack=False,
+    )
 
-    def callback(ch, method, properties, body):
-        try:
-            payload = json.loads(body.decode("utf-8"))
-
-            y_pred = predict_one(payload)
-            prediction_id = insert_prediction(raw_id=None, prediction=y_pred)
-
-            logging.info(f"Job done. prediction_id={prediction_id}, y_pred={y_pred}")
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-
-        except Exception as e:
-            logging.exception(f"Job failed: {e}")
-            # simple behavior: ack so it doesn't loop forever
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-
-    channel.basic_consume(queue=RABBITMQ_QUEUE, on_message_callback=callback, auto_ack=False)
     logging.info("Worker started. Waiting for messages...")
     channel.start_consuming()
+
 
 
 if __name__ == "__main__":
