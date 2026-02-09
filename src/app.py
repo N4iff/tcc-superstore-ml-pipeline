@@ -9,6 +9,7 @@ import logging
 import pika
 import json
 import uuid
+from datetime import datetime
 
 
 import psycopg2
@@ -279,28 +280,28 @@ def dedupe_preserve_order(items: list[int]) -> list[int]:
     return out
 
 def create_async_job(job_id: str) -> None:
+    sql = """
+        INSERT INTO async_jobs (job_id, status)
+        VALUES (%s, 'queued')
+    """
     with get_db_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO async_jobs (job_id, status) VALUES (%s, 'queued');",
-                (job_id,),
-            )
+            cur.execute(sql, (job_id,))
         conn.commit()
 
 
-def get_async_job(job_id: str):
+def get_async_job(job_id: str) -> Optional[dict]:
+    sql = """
+        SELECT job_id, status, prediction_id, error, created_at, updated_at
+        FROM async_jobs
+        WHERE job_id = %s
+        LIMIT 1;
+    """
     with get_db_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT job_id, status, prediction_id, error, created_at, updated_at
-                FROM async_jobs
-                WHERE job_id = %s;
-                """,
-                (job_id,),
-            )
-            return cur.fetchone()
-
+            cur.execute(sql, (job_id,))
+            row = cur.fetchone()
+    return row
 
 # --------------------
 # API Endpoints
@@ -473,13 +474,13 @@ def predict_async(req: PredictRequest):
     payload = req.model_dump()
     job_id = str(uuid.uuid4())
 
-    # 1) Save job in DB
+    # 1) create job row first
     try:
         create_async_job(job_id)
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"DB insert failed: {e}")
+        raise HTTPException(status_code=503, detail=f"DB insert async job failed: {e}")
 
-    # 2) Publish to RabbitMQ
+    # 2) publish message with job_id + payload
     try:
         credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
         params = pika.ConnectionParameters(
@@ -490,39 +491,32 @@ def predict_async(req: PredictRequest):
             heartbeat=30,
             blocked_connection_timeout=30,
         )
-
         connection = pika.BlockingConnection(params)
+
         channel = connection.channel()
         channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
 
         channel.basic_publish(
             exchange="",
             routing_key=RABBITMQ_QUEUE,
-            body=json.dumps(
-                {"job_id": job_id, "payload": payload}
-            ).encode("utf-8"),
+            body=json.dumps({"job_id": job_id, "payload": payload}).encode("utf-8"),
             properties=pika.BasicProperties(delivery_mode=2),
         )
 
         connection.close()
-
     except Exception as e:
-        with get_db_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE async_jobs SET status='failed', error=%s WHERE job_id=%s;",
-                    (str(e), job_id),
-                )
-            conn.commit()
-
         raise HTTPException(status_code=503, detail=f"Queue publish failed: {e}")
 
-    return {"status": "queued", "job_id": job_id}
+    return {"job_id": job_id, "status": "queued"}
 
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    try:
+        row = get_async_job(job_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"DB fetch failed: {e}")
 
-@app.get("/predict_async/result/{job_id}")
-def predict_async_result(job_id: str):
-    row = get_async_job(job_id)
     if not row:
         raise HTTPException(status_code=404, detail="job_id not found")
+
     return row
